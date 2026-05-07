@@ -27,8 +27,14 @@ def in_daylight_window() -> bool:
 
 
 def send_telegram(message: str) -> None:
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    missing = [name for name, val in (("TELEGRAM_BOT_TOKEN", token), ("TELEGRAM_CHAT_ID", chat_id)) if not val]
+    if missing:
+        raise RuntimeError(
+            f"Telegram secret(s) not set or empty: {', '.join(missing)}. "
+            "Check repo Settings → Secrets and variables → Actions."
+        )
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data={"chat_id": chat_id, "text": message},
