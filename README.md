@@ -1,4 +1,4 @@
-# Web Page Change Watcher
+# Tea Event Web Page Change Watcher
 
 Watches the [Bardo Tea events page](https://bardotea.com/collections/events) and pings me when it changes, so I can grab a class spot before it fills.
 
