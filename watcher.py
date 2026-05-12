@@ -14,17 +14,11 @@ from bs4 import BeautifulSoup
 URL = "https://bardotea.com/collections/events"
 SELECTOR = ".product-list-container"
 HASH_FILE = Path("last_hash.txt")
-TIMEZONE = ZoneInfo("America/Los_Angeles")
-DAYLIGHT_START = 6   # 6 AM Pacific, inclusive
-DAYLIGHT_END = 22    # 10 PM Pacific, exclusive
+TIMEZONE = ZoneInfo("America/Los_Angeles")  # used only for diagnostic timestamps
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 )
-
-
-def in_daylight_window() -> bool:
-    return DAYLIGHT_START <= datetime.now(TIMEZONE).hour < DAYLIGHT_END
 
 
 def send_telegram(message: str) -> None:
@@ -112,10 +106,6 @@ def run_list() -> int:
 
 
 def main() -> int:
-    if not in_daylight_window():
-        print("Outside daylight window; skipping.")
-        return 0
-
     response = requests.get(URL, headers={"User-Agent": USER_AGENT}, timeout=30)
     response.raise_for_status()
 

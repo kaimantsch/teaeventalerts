@@ -2,7 +2,7 @@ name: Watch Bardo Tea Events
 
 on:
   schedule:
-    - cron: '0 * * * *'  # every hour UTC; watcher.py gates on Pacific daylight
+    - cron: '0 * * * *'  # every hour, all day (teachers post from overseas)
   workflow_dispatch:
 
 permissions:

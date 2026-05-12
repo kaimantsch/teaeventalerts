@@ -4,7 +4,7 @@ Watches the [Bardo Tea events page](https://bardotea.com/collections/events) and
 
 ## How it works
 
-1. A scheduled job fetches the events page every hour during daylight hours.
+1. A scheduled job fetches the events page every hour, around the clock.
 2. The page's relevant content is hashed and compared to the last stored hash.
 3. If the hash changed, a notification with the page URL is sent to my phone.
 4. The new hash is saved for the next run.
