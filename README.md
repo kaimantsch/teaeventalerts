@@ -29,6 +29,14 @@ The job runs in the cloud (GitHub Actions), so it works whether my laptop is on 
 ## Running locally
 
 ```bash
-pip install requests
+pip install -r requirements.txt
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python watcher.py
 ```
+
+## Checking what the script sees
+
+```bash
+python watcher.py --list
+```
+
+Prints each event the watcher currently parses (title, price, sold-out status, URL), plus the current vs. stored hash. No Telegram token required, no hash file written. Use this to confirm the page selector still works and to compare against the stored state.
