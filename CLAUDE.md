@@ -22,6 +22,8 @@ GitHub Actions cron triggers a Python script every 30 minutes, around the clock.
 - Secrets are read from environment variables (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Never commit them.
 - `last_hash.txt` is committed by the workflow on change. The first run after deploy records a baseline silently (no notification on empty prior hash) — that's intentional, not a bug.
 - The watcher runs every 30 minutes around the clock. There used to be a Pacific-daylight gate; it was removed because the teachers post from overseas and drops can land at any hour.
+- Three state files are committed back to the repo: `last_hash.txt`, `last_success.txt`, `last_canary.txt`. `last_success` is refreshed at most every 2h to keep commit history readable; the canary fires once per stale-fetch episode (no successful fetch in 4h) and dedupes via `last_canary` until a fresh success advances `last_success` past it.
+- Fetch errors are classified: 5xx, 429, connection errors, and timeouts soft-fail (exit 0, log, leave state untouched). Other 4xx errors re-raise so the workflow turns red and the user notices.
 
 ## When extending
 

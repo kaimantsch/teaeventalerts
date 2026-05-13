@@ -4,7 +4,7 @@ import hashlib
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
@@ -15,6 +15,10 @@ from bs4 import BeautifulSoup
 URL = "https://bardotea.com/collections/events"
 SELECTOR = ".product-list-container"
 HASH_FILE = Path("last_hash.txt")
+SUCCESS_FILE = Path("last_success.txt")
+CANARY_FILE = Path("last_canary.txt")
+STALENESS_THRESHOLD = timedelta(hours=4)   # alert if no successful fetch in this long
+SUCCESS_WRITE_INTERVAL = timedelta(hours=2)  # only refresh last_success this often, to limit git noise
 TIMEZONE = ZoneInfo("America/Los_Angeles")  # used only for diagnostic timestamps
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -22,20 +26,72 @@ USER_AGENT = (
 )
 
 
+def is_transient(exc: requests.RequestException) -> bool:
+    """Transient errors recover on their own; persistent errors need attention."""
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return True
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        status = exc.response.status_code
+        return status >= 500 or status == 429
+    return False
+
+
 def fetch_page() -> requests.Response | None:
-    """Fetch the events page with one retry on transient failure. Returns None on giving up."""
-    last_err: Exception | None = None
+    """Fetch the events page. One retry on transient errors, then None.
+    Non-transient errors (4xx other than 429) re-raise so the workflow fails loudly."""
+    last_err: requests.RequestException | None = None
     for attempt in (1, 2):
         try:
             response = requests.get(URL, headers={"User-Agent": USER_AGENT}, timeout=30)
             response.raise_for_status()
             return response
         except requests.RequestException as exc:
+            if not is_transient(exc):
+                raise
             last_err = exc
             if attempt == 1:
                 time.sleep(5)
-    print(f"Fetch failed after retry: {last_err}. Treating as transient; will try again next run.")
+    print(f"Transient fetch failure after retry: {last_err}. Will try again next run.")
     return None
+
+
+def read_iso(path: Path) -> datetime | None:
+    if not path.exists():
+        return None
+    raw = path.read_text().strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def write_iso(path: Path, dt: datetime) -> None:
+    path.write_text(dt.isoformat() + "\n")
+
+
+def maybe_send_canary(now: datetime) -> None:
+    """Ping Telegram if we haven't had a successful fetch in STALENESS_THRESHOLD.
+    Dedupes via last_canary.txt: one alert per stale episode."""
+    last_success = read_iso(SUCCESS_FILE)
+    if last_success is None:
+        return  # no baseline yet, nothing to compare
+    age = now - last_success
+    if age < STALENESS_THRESHOLD:
+        return
+    last_canary = read_iso(CANARY_FILE)
+    if last_canary is not None and last_canary > last_success:
+        return  # already alerted for this outage
+    hours = int(age.total_seconds() // 3600)
+    send_telegram(
+        f"Bardo Tea watcher: no successful fetch in ~{hours}h "
+        f"(last success {last_success.isoformat(timespec='minutes')}). "
+        "Check the GitHub Actions workflow."
+    )
+    write_iso(CANARY_FILE, now)
+    print(f"Canary sent: stale by {hours}h.")
 
 
 def send_telegram(message: str) -> None:
@@ -119,13 +175,29 @@ def run_list() -> int:
         print("State:         unchanged since last run")
     else:
         print("State:         CHANGED since last stored hash")
+    last_success = read_iso(SUCCESS_FILE)
+    last_canary = read_iso(CANARY_FILE)
+    print(f"Last success:  {last_success.isoformat(timespec='minutes') if last_success else '(none recorded)'}")
+    if last_canary:
+        print(f"Last canary:   {last_canary.isoformat(timespec='minutes')}")
     return 0
 
 
 def main() -> int:
+    now = datetime.now(timezone.utc)
+    try:
+        maybe_send_canary(now)
+    except Exception as exc:
+        # Canary is bonus monitoring; don't let it take the run down.
+        print(f"Canary check failed (continuing): {exc}")
+
     response = fetch_page()
     if response is None:
         return 0
+
+    last_success = read_iso(SUCCESS_FILE)
+    if last_success is None or (now - last_success) >= SUCCESS_WRITE_INTERVAL:
+        write_iso(SUCCESS_FILE, now)
 
     mode, content = extract_signature(response.text)
     new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()

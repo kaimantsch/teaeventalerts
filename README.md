@@ -11,6 +11,8 @@ Watches the [Bardo Tea events page](https://bardotea.com/collections/events) and
 
 The job runs in the cloud (GitHub Actions), so it works whether my laptop is on or off.
 
+A canary watches the watcher: if no successful fetch happens for 4 hours, a one-time Telegram alert fires so I notice silent breakage (URL change, sustained bot block, etc.).
+
 ## Setup
 
 1. Create a Telegram bot via [@BotFather](https://t.me/botfather), grab the token.
@@ -22,7 +24,9 @@ The job runs in the cloud (GitHub Actions), so it works whether my laptop is on 
 
 - `watcher.py` — fetches the page, hashes it, sends a Telegram message on change.
 - `.github/workflows/check.yml` — GitHub Actions cron schedule.
-- `last_hash.txt` — committed by the workflow each run; this is the change-detection state.
+- `last_hash.txt` — committed by the workflow on change; the page-hash baseline.
+- `last_success.txt` — UTC timestamp of the most recent successful fetch (refreshed every ~2h to limit git noise). Powers the staleness canary.
+- `last_canary.txt` — UTC timestamp of the most recent canary alert; used to dedupe one alert per outage.
 - `REQUIREMENTS.md` — what this project does and doesn't do.
 - `CLAUDE.md` — guidance for Claude Code when working on this project.
 
