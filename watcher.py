@@ -3,6 +3,7 @@
 import hashlib
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -19,6 +20,22 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 )
+
+
+def fetch_page() -> requests.Response | None:
+    """Fetch the events page with one retry on transient failure. Returns None on giving up."""
+    last_err: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            response = requests.get(URL, headers={"User-Agent": USER_AGENT}, timeout=30)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last_err = exc
+            if attempt == 1:
+                time.sleep(5)
+    print(f"Fetch failed after retry: {last_err}. Treating as transient; will try again next run.")
+    return None
 
 
 def send_telegram(message: str) -> None:
@@ -106,8 +123,9 @@ def run_list() -> int:
 
 
 def main() -> int:
-    response = requests.get(URL, headers={"User-Agent": USER_AGENT}, timeout=30)
-    response.raise_for_status()
+    response = fetch_page()
+    if response is None:
+        return 0
 
     mode, content = extract_signature(response.text)
     new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
