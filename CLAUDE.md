@@ -14,14 +14,14 @@ A single-purpose scheduled job that watches one URL and texts the owner when it 
 
 ## Architecture in one paragraph
 
-GitHub Actions cron triggers a Python script every hour, around the clock. The script fetches the events page, hashes the relevant content, compares to `last_hash.txt`, and on mismatch posts a message to a Telegram chat via the Bot API. The workflow then commits the new hash back to the repo. State lives in git; no database.
+GitHub Actions cron triggers a Python script every 30 minutes, around the clock. The script fetches the events page, hashes the relevant content, compares to `last_hash.txt`, and on mismatch posts a message to a Telegram chat via the Bot API. The workflow then commits the new hash back to the repo. State lives in git; no database.
 
 ## Conventions
 
 - One Python file (`watcher.py`). Don't split into modules until there's a real reason.
 - Secrets are read from environment variables (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Never commit them.
 - `last_hash.txt` is committed by the workflow on change. The first run after deploy records a baseline silently (no notification on empty prior hash) — that's intentional, not a bug.
-- The watcher runs every hour around the clock. There used to be a Pacific-daylight gate; it was removed because the teachers post from overseas and drops can land at any hour.
+- The watcher runs every 30 minutes around the clock. There used to be a Pacific-daylight gate; it was removed because the teachers post from overseas and drops can land at any hour.
 
 ## When extending
 

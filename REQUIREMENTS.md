@@ -7,7 +7,7 @@ Get notified the moment Bardo Tea posts a new class so I can register before the
 ## Functional requirements
 
 1. **Target page**: `https://bardotea.com/collections/events`
-2. **Check frequency**: once per hour, around the clock. The teachers post from overseas, so a daylight gate (Pacific) would miss drops.
+2. **Check frequency**: every 30 minutes, around the clock. The teachers post from overseas, so a daylight gate (Pacific) would miss drops.
 3. **Change detection**: hash the relevant portion of the page (event listings, not full HTML chrome that may rotate per request) and compare to the last saved hash.
 4. **Notification**: when the hash changes, send a message containing the events page URL to my phone.
    - *Chosen channel:* Telegram (free, simple, no SMS gateway costs). SMS via Twilio and Signal via signal-cli are alternatives if Telegram doesn't suit.
