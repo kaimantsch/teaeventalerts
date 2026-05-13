@@ -4,12 +4,14 @@ Watches the [Bardo Tea events page](https://bardotea.com/collections/events) and
 
 ## How it works
 
-1. A scheduled job fetches the events page every hour during daylight hours.
+1. A scheduled job fetches the events page every 30 minutes, around the clock.
 2. The page's relevant content is hashed and compared to the last stored hash.
 3. If the hash changed, a notification with the page URL is sent to my phone.
 4. The new hash is saved for the next run.
 
 The job runs in the cloud (GitHub Actions), so it works whether my laptop is on or off.
+
+A canary watches the watcher: if no successful fetch happens for 4 hours, a one-time Telegram alert fires so I notice silent breakage (URL change, sustained bot block, etc.).
 
 ## Setup
 
@@ -22,13 +24,23 @@ The job runs in the cloud (GitHub Actions), so it works whether my laptop is on 
 
 - `watcher.py` — fetches the page, hashes it, sends a Telegram message on change.
 - `.github/workflows/check.yml` — GitHub Actions cron schedule.
-- `last_hash.txt` — committed by the workflow each run; this is the change-detection state.
+- `last_hash.txt` — committed by the workflow on change; the page-hash baseline.
+- `last_success.txt` — UTC timestamp of the most recent successful fetch (refreshed every ~2h to limit git noise). Powers the staleness canary.
+- `last_canary.txt` — UTC timestamp of the most recent canary alert; used to dedupe one alert per outage.
 - `REQUIREMENTS.md` — what this project does and doesn't do.
 - `CLAUDE.md` — guidance for Claude Code when working on this project.
 
 ## Running locally
 
 ```bash
-pip install requests
+pip install -r requirements.txt
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python watcher.py
 ```
+
+## Checking what the script sees
+
+```bash
+python watcher.py --list
+```
+
+Prints each event the watcher currently parses (title, price, sold-out status, URL), plus the current vs. stored hash. No Telegram token required, no hash file written. Use this to confirm the page selector still works and to compare against the stored state.

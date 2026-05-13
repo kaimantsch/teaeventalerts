@@ -7,8 +7,7 @@ Get notified the moment Bardo Tea posts a new class so I can register before the
 ## Functional requirements
 
 1. **Target page**: `https://bardotea.com/collections/events`
-2. **Check frequency**: once per hour, during daylight hours only.
-   - *Working definition of daylight:* 6:00 AM – 9:00 PM Pacific Time. Adjust if needed.
+2. **Check frequency**: every 30 minutes, around the clock. The teachers post from overseas, so a daylight gate (Pacific) would miss drops.
 3. **Change detection**: hash the relevant portion of the page (event listings, not full HTML chrome that may rotate per request) and compare to the last saved hash.
 4. **Notification**: when the hash changes, send a message containing the events page URL to my phone.
    - *Chosen channel:* Telegram (free, simple, no SMS gateway costs). SMS via Twilio and Signal via signal-cli are alternatives if Telegram doesn't suit.
@@ -32,7 +31,6 @@ Get notified the moment Bardo Tea posts a new class so I can register before the
 ## Open questions for the user
 
 - Confirm Telegram is the right notification channel (vs. SMS or Signal).
-- Confirm the daylight window (6 AM – 9 PM Pacific) — adjust if your timezone or sleep schedule differs.
 - Should we ignore changes that are clearly not new events (e.g. footer copy, tracking tokens in URLs)? If yes, we'll need a CSS selector for the events list.
 
 ## Architecture decision

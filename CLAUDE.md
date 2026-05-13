@@ -14,14 +14,16 @@ A single-purpose scheduled job that watches one URL and texts the owner when it 
 
 ## Architecture in one paragraph
 
-GitHub Actions cron triggers a Python script hourly during daylight. The script fetches the events page, hashes the relevant content, compares to `last_hash.txt`, and on mismatch posts a message to a Telegram chat via the Bot API. The workflow then commits the new hash back to the repo. State lives in git; no database.
+GitHub Actions cron triggers a Python script every 30 minutes, around the clock. The script fetches the events page, hashes the relevant content, compares to `last_hash.txt`, and on mismatch posts a message to a Telegram chat via the Bot API. The workflow then commits the new hash back to the repo. State lives in git; no database.
 
 ## Conventions
 
 - One Python file (`watcher.py`). Don't split into modules until there's a real reason.
 - Secrets are read from environment variables (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Never commit them.
 - `last_hash.txt` is committed by the workflow on change. The first run after deploy records a baseline silently (no notification on empty prior hash) — that's intentional, not a bug.
-- Keep the daylight gate in the script (early-exit if outside window) rather than relying solely on cron. GitHub cron is UTC; the script knows the user's timezone.
+- The watcher runs every 30 minutes around the clock. There used to be a Pacific-daylight gate; it was removed because the teachers post from overseas and drops can land at any hour.
+- Three state files are committed back to the repo: `last_hash.txt`, `last_success.txt`, `last_canary.txt`. `last_success` is refreshed at most every 2h to keep commit history readable; the canary fires once per stale-fetch episode (no successful fetch in 4h) and dedupes via `last_canary` until a fresh success advances `last_success` past it.
+- Fetch errors are classified: 5xx, 429, connection errors, and timeouts soft-fail (exit 0, log, leave state untouched). Other 4xx errors re-raise so the workflow turns red and the user notices.
 
 ## When extending
 
