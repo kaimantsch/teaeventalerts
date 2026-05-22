@@ -1,56 +1,94 @@
 #!/usr/bin/env python3
-"""Watch the Bardo Tea events page; ping Telegram when the listings change."""
+"""Watch the Bardo Tea events feed; ping Telegram when the listings change.
+
+The site sits behind Cloudflare bot protection that blocks the Python HTTP
+client at the TLS-fingerprint level. We fetch with `curl` (a standard tool,
+present on the GitHub runner) against Shopify's structured products feed
+instead of scraping HTML. Telegram has no such protection, so notifications
+still go out via `requests`.
+"""
 import hashlib
+import json
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 import requests
-from bs4 import BeautifulSoup
 
-URL = "https://bardotea.com/collections/events"
-SELECTOR = ".product-list-container"
+SITE = "https://bardotea.com"
+URL = f"{SITE}/collections/events"                      # human-facing page, used in notifications
+API_URL = f"{SITE}/collections/events/products.json"    # structured feed we actually fetch
 HASH_FILE = Path("last_hash.txt")
 SUCCESS_FILE = Path("last_success.txt")
 CANARY_FILE = Path("last_canary.txt")
-STALENESS_THRESHOLD = timedelta(hours=4)   # alert if no successful fetch in this long
+STALENESS_THRESHOLD = timedelta(hours=4)     # alert if no successful fetch in this long
 SUCCESS_WRITE_INTERVAL = timedelta(hours=2)  # only refresh last_success this often, to limit git noise
-TIMEZONE = ZoneInfo("America/Los_Angeles")  # used only for diagnostic timestamps
+TIMEZONE = ZoneInfo("America/Los_Angeles")   # used only for diagnostic timestamps
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 )
 
 
-def is_transient(exc: requests.RequestException) -> bool:
-    """Transient errors recover on their own; persistent errors need attention."""
-    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
-        return True
-    if isinstance(exc, requests.HTTPError) and exc.response is not None:
-        status = exc.response.status_code
-        return status >= 500 or status == 429
-    return False
+def curl_get(url: str) -> tuple[int, str]:
+    """Fetch a URL with curl. Returns (http_status, body).
+    Raises ConnectionError on a curl transport-level failure (network, DNS, TLS, timeout)."""
+    try:
+        result = subprocess.run(
+            ["curl", "-sSL", "--compressed", "-A", USER_AGENT,
+             "--max-time", "30", "-w", "\n%{http_code}", url],
+            capture_output=True, text=True, timeout=45,
+        )
+    except subprocess.TimeoutExpired:
+        raise ConnectionError("curl timed out")
+    if result.returncode != 0:
+        raise ConnectionError(
+            f"curl transport error (exit {result.returncode}): {result.stderr.strip()}"
+        )
+    body, _, status = result.stdout.rpartition("\n")
+    try:
+        return int(status), body
+    except ValueError:
+        raise ConnectionError(f"could not parse curl status from output tail: {status!r}")
 
 
-def fetch_page() -> requests.Response | None:
-    """Fetch the events page. One retry on transient errors, then None.
-    Non-transient errors (4xx other than 429) re-raise so the workflow fails loudly."""
-    last_err: requests.RequestException | None = None
+def fetch_events_data() -> dict | None:
+    """Fetch the Shopify events feed via curl, with one retry on transient failure.
+    Returns parsed JSON, or None when giving up on a transient error.
+    Raises on non-transient HTTP errors (e.g. 404) so the workflow fails loudly.
+
+    Transient (soft-fail, retry next run): connection errors, timeouts, 5xx,
+    429, 403. A 403 here is the Cloudflare bot challenge; it tends to be
+    intermittent, and a sustained outage is caught by the staleness canary,
+    so reding the build on every 403 would just be alarm fatigue."""
+    last_err = None
     for attempt in (1, 2):
+        status = None
+        body = ""
         try:
-            response = requests.get(URL, headers={"User-Agent": USER_AGENT}, timeout=30)
-            response.raise_for_status()
-            return response
-        except requests.RequestException as exc:
-            if not is_transient(exc):
-                raise
-            last_err = exc
-            if attempt == 1:
-                time.sleep(5)
+            status, body = curl_get(API_URL)
+        except ConnectionError as exc:
+            last_err = str(exc)
+
+        if status == 200:
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError:
+                last_err = "HTTP 200 but body was not JSON (likely a bot-check page)"
+        elif status in (404, 410):
+            raise RuntimeError(
+                f"Events feed returned HTTP {status}; the URL may have changed. {API_URL}"
+            )
+        elif status is not None:
+            last_err = f"HTTP {status}"  # 403 / 429 / 5xx: transient
+
+        if attempt == 1:
+            time.sleep(5)
+
     print(f"Transient fetch failure after retry: {last_err}. Will try again next run.")
     return None
 
@@ -111,55 +149,51 @@ def send_telegram(message: str) -> None:
     response.raise_for_status()
 
 
-def extract_signature(html: str) -> tuple[str, str]:
-    """Return (mode, normalized_text). mode is 'targeted' or 'fallback'."""
-    soup = BeautifulSoup(html, "html.parser")
-    container = soup.select_one(SELECTOR)
-    if container:
-        text = " ".join(container.get_text(separator=" ", strip=True).split())
-        if text:
-            return "targeted", text
-    body = soup.body or soup
-    text = " ".join(body.get_text(separator=" ", strip=True).split())
-    return "fallback", text
-
-
-def extract_events(html: str) -> list[dict]:
-    """Pull a structured list of events from the page for the --list diagnostic."""
-    soup = BeautifulSoup(html, "html.parser")
+def extract_events(data: dict) -> list[dict]:
+    """Pull a structured list of events from the Shopify feed."""
     events = []
-    for block in soup.select(f"{SELECTOR} .product-block"):
-        title_el = block.select_one(".title")
-        price_el = block.select_one(".price")
-        link_el = block.select_one("a.caption[href]") or block.select_one("a[href*='/products/']")
-        sold_out = "sold-out" in (block.get("class") or []) or block.select_one(".product-label.unavailable") is not None
+    for product in data.get("products", []):
+        variants = product.get("variants", [])
+        available = any(v.get("available") for v in variants)
+        price = variants[0].get("price") if variants else None
         events.append({
-            "title": title_el.get_text(strip=True) if title_el else "(no title)",
-            "price": " ".join(price_el.get_text(" ", strip=True).split()) if price_el else "",
-            "status": "SOLD OUT" if sold_out else "AVAILABLE",
-            "url": urljoin(URL, link_el["href"]) if link_el else "",
+            "title": product.get("title", "(no title)"),
+            "price": f"${price}" if price else "",
+            "status": "AVAILABLE" if available else "SOLD OUT",
+            "url": f"{SITE}/products/{product.get('handle', '')}",
         })
     return events
 
 
+def extract_signature(data: dict) -> str:
+    """Build a stable string capturing each event's identity and availability.
+    Sorted so a reorder alone is not treated as a change; a new event, a
+    removed event, or a sold-out/available flip all change the signature."""
+    lines = [
+        f"{ev['title']}|{ev['url']}|{ev['status']}"
+        for ev in extract_events(data)
+    ]
+    return "\n".join(sorted(lines))
+
+
 def run_list() -> int:
-    """Diagnostic: fetch the page, print events as the script sees them, plus hash state."""
-    response = requests.get(URL, headers={"User-Agent": USER_AGENT}, timeout=30)
-    response.raise_for_status()
+    """Diagnostic: fetch the feed, print events as the script sees them, plus hash state."""
+    data = fetch_events_data()
+    if data is None:
+        print("Could not fetch the events feed (transient error). Try again shortly.")
+        return 0
 
-    mode, content = extract_signature(response.text)
-    new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    new_hash = hashlib.sha256(extract_signature(data).encode("utf-8")).hexdigest()
     old_hash = HASH_FILE.read_text().strip() if HASH_FILE.exists() else ""
+    events = extract_events(data)
 
-    events = extract_events(response.text)
     now = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
     print(f"Bardo Tea events as of {now}")
     print(f"URL:           {URL}")
-    print(f"Signature mode: {mode}")
     print(f"Events found:  {len(events)}")
     print()
     if not events:
-        print("(no event blocks parsed — selector may have broken)")
+        print("(no events in feed — the feed format may have changed)")
     for i, ev in enumerate(events, 1):
         print(f"{i}. [{ev['status']}] {ev['title']}")
         if ev["price"]:
@@ -191,31 +225,29 @@ def main() -> int:
         # Canary is bonus monitoring; don't let it take the run down.
         print(f"Canary check failed (continuing): {exc}")
 
-    response = fetch_page()
-    if response is None:
+    data = fetch_events_data()
+    if data is None:
         return 0
 
     last_success = read_iso(SUCCESS_FILE)
     if last_success is None or (now - last_success) >= SUCCESS_WRITE_INTERVAL:
         write_iso(SUCCESS_FILE, now)
 
-    mode, content = extract_signature(response.text)
-    new_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    new_hash = hashlib.sha256(extract_signature(data).encode("utf-8")).hexdigest()
     old_hash = HASH_FILE.read_text().strip() if HASH_FILE.exists() else ""
 
     if new_hash == old_hash:
-        print(f"No change ({mode}, {new_hash[:12]}).")
+        print(f"No change ({new_hash[:12]}).")
         return 0
 
     HASH_FILE.write_text(new_hash + "\n")
 
     if not old_hash:
-        print(f"Baseline recorded ({mode}, {new_hash[:12]}). No notification on first run.")
+        print(f"Baseline recorded ({new_hash[:12]}). No notification on first run.")
         return 0
 
-    prefix = "" if mode == "targeted" else "Selector failed; alerting on full-page change. "
-    send_telegram(f"{prefix}Bardo Tea events page changed:\n{URL}")
-    print(f"Change detected ({mode}); notification sent.")
+    send_telegram(f"Bardo Tea events page changed:\n{URL}")
+    print("Change detected; notification sent.")
     return 0
 
 

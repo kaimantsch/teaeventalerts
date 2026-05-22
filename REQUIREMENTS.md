@@ -6,9 +6,9 @@ Get notified the moment Bardo Tea posts a new class so I can register before the
 
 ## Functional requirements
 
-1. **Target page**: `https://bardotea.com/collections/events`
+1. **Target page**: `https://bardotea.com/collections/events`. The site is behind Cloudflare bot protection, so the watcher fetches the Shopify JSON feed (`/collections/events/products.json`) with `curl` rather than scraping the HTML page.
 2. **Check frequency**: every 30 minutes, around the clock. The teachers post from overseas, so a daylight gate (Pacific) would miss drops.
-3. **Change detection**: hash the relevant portion of the page (event listings, not full HTML chrome that may rotate per request) and compare to the last saved hash.
+3. **Change detection**: hash a signature of the event listings (title, link, sold-out status) and compare to the last saved hash.
 4. **Notification**: when the hash changes, send a message containing the events page URL to my phone.
    - *Chosen channel:* Telegram (free, simple, no SMS gateway costs). SMS via Twilio and Signal via signal-cli are alternatives if Telegram doesn't suit.
 5. **Persistence**: the last-seen hash must survive between runs.
@@ -26,12 +26,11 @@ Get notified the moment Bardo Tea posts a new class so I can register before the
 - Auto-registering for the class. Notification only — I'll click the link and register myself.
 - Diffing exactly *what* changed. Just "something changed, go look."
 - Handling multiple sites or multiple users.
-- Authenticating to the site or bypassing bot protection.
+- Authenticating to the site. Browser-impersonation tooling that exists specifically to defeat bot protection (`curl_cffi`, `cloudscraper`, headless browsers) also stays out. Fetching the public JSON feed with plain `curl` is allowed; if the site hard-blocks that too, revisit with the user rather than escalating.
 
 ## Open questions for the user
 
 - Confirm Telegram is the right notification channel (vs. SMS or Signal).
-- Should we ignore changes that are clearly not new events (e.g. footer copy, tracking tokens in URLs)? If yes, we'll need a CSS selector for the events list.
 
 ## Architecture decision
 
