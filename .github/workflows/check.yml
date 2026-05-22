@@ -2,7 +2,8 @@ name: Watch Bardo Tea Events
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # every 30 minutes, all day (teachers post from overseas)
+    # Every 2 hours at :17 (an off-round minute). A random delay is added below.
+    - cron: '17 */2 * * *'
   workflow_dispatch:
 
 permissions:
@@ -24,6 +25,13 @@ jobs:
           cache: pip
 
       - run: pip install -r requirements.txt
+
+      # Cron always fires on the same minute. A random 0-15 min delay spreads
+      # the actual fetch so the traffic looks less mechanical. Skipped for
+      # manual (workflow_dispatch) runs so testing stays immediate.
+      - name: Random jitter
+        if: github.event_name == 'schedule'
+        run: sleep $(( RANDOM % 900 ))
 
       - run: python watcher.py
         env:

@@ -7,7 +7,7 @@ Get notified the moment Bardo Tea posts a new class so I can register before the
 ## Functional requirements
 
 1. **Target page**: `https://bardotea.com/collections/events`. The site is behind Cloudflare bot protection, so the watcher fetches the Shopify JSON feed (`/collections/events/products.json`) with `curl` rather than scraping the HTML page.
-2. **Check frequency**: every 30 minutes, around the clock. The teachers post from overseas, so a daylight gate (Pacific) would miss drops.
+2. **Check frequency**: every 2 hours, around the clock, plus a random 0-15 minute delay. The teachers post from overseas, so a daylight gate (Pacific) would miss drops. The 2-hour cadence (down from 30 min) and the jitter keep the request volume and timing from looking mechanical to the site's bot protection.
 3. **Change detection**: hash a signature of the event listings (title, link, sold-out status) and compare to the last saved hash.
 4. **Notification**: when the hash changes, send a message containing the events page URL to my phone.
    - *Chosen channel:* Telegram (free, simple, no SMS gateway costs). SMS via Twilio and Signal via signal-cli are alternatives if Telegram doesn't suit.

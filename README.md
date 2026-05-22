@@ -4,7 +4,7 @@ Watches the [Bardo Tea events page](https://bardotea.com/collections/events) and
 
 ## How it works
 
-1. A scheduled job fetches the Bardo Tea events feed every 30 minutes, around the clock.
+1. A scheduled job fetches the Bardo Tea events feed every 2 hours, around the clock, with a random delay so the traffic looks less mechanical.
 2. A signature of each event (title, link, sold-out status) is hashed and compared to the last stored hash.
 3. If the hash changed, a notification with the page URL is sent to my phone.
 4. The new hash is saved for the next run.
