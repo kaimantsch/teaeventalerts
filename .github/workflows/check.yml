@@ -2,7 +2,7 @@ name: Watch Bardo Tea Events
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # every 30 minutes, all day (teachers post from overseas)
+    - cron: '*/90 * * * *'  # every 90 minutes, all day (teachers post from overseas)
   workflow_dispatch:
 
 permissions:
